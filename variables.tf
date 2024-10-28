@@ -1,168 +1,9 @@
-################################################################################
-# Repository
-################################################################################
-
-variable "create_repository" {
-  description = "Determines whether a repository will be created"
-  type        = bool
-  default     = true
-}
-
-variable "repository_name" {
-  description = "The name of the repository"
+variable "cluster_name" {
+  description = "Name of the cluster"
   type        = string
-  default     = ""
 }
 
-variable "repository_image_tag_mutability" {
-  description = "The tag mutability setting for the repository. Must be one of: `MUTABLE` or `IMMUTABLE`. Defaults to `IMMUTABLE`"
-  type        = string
-  default     = "IMMUTABLE"
-}
 
-variable "repository_encryption_type" {
-  description = "The encryption type for the repository. Must be one of: `KMS` or `AES256`. Defaults to `AES256`"
-  type        = string
-  default     = null
-}
-
-variable "repository_kms_key" {
-  description = "The ARN of the KMS key to use when encryption_type is `KMS`. If not specified, uses the default AWS managed key for ECR"
-  type        = string
-  default     = null
-}
-
-variable "repository_image_scan_on_push" {
-  description = "Indicates whether images are scanned after being pushed to the repository (`true`) or not scanned (`false`)"
-  type        = bool
-  default     = true
-}
-
-variable "repository_policy" {
-  description = "The JSON policy to apply to the repository. If not specified, uses the default policy"
-  type        = string
-  default     = null
-}
-
-variable "repository_force_delete" {
-  description = "If `true`, will delete the repository even if it contains images. Defaults to `false`"
-  type        = bool
-  default     = null
-}
-
-################################################################################
-# Repository Policy
-################################################################################
-
-variable "attach_repository_policy" {
-  description = "Determines whether a repository policy will be attached to the repository"
-  type        = bool
-  default     = true
-}
-
-variable "create_repository_policy" {
-  description = "Determines whether a repository policy will be created"
-  type        = bool
-  default     = true
-}
-
-variable "repository_read_access_arns" {
-  description = "The ARNs of the IAM users/roles that have read access to the repository"
-  type        = list(string)
-  default     = []
-}
-
-variable "repository_lambda_read_access_arns" {
-  description = "The ARNs of the Lambda service roles that have read access to the repository"
-  type        = list(string)
-  default     = []
-}
-
-variable "repository_read_write_access_arns" {
-  description = "The ARNs of the IAM users/roles that have read/write access to the repository"
-  type        = list(string)
-  default     = []
-}
-
-################################################################################
-# Lifecycle Policy
-################################################################################
-
-variable "create_lifecycle_policy" {
-  description = "Determines whether a lifecycle policy will be created"
-  type        = bool
-  default     = false
-}
-
-variable "repository_lifecycle_policy" {
-  description = "The policy document. This is a JSON formatted string. See more details about [Policy Parameters](http://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html#lifecycle_policy_parameters) in the official AWS docs"
-  type        = string
-  default     = ""
-}
-
-################################################################################
-# Registry Policy
-################################################################################
-
-variable "create_registry_policy" {
-  description = "Determines whether a registry policy will be created"
-  type        = bool
-  default     = false
-}
-
-variable "registry_policy" {
-  description = "The policy document. This is a JSON formatted string"
-  type        = string
-  default     = null
-}
-
-################################################################################
-# Registry Pull Through Cache Rule
-################################################################################
-
-variable "registry_pull_through_cache_rules" {
-  description = "List of pull through cache rules to create"
-  type        = map(map(string))
-  default     = {}
-}
-
-################################################################################
-# Registry Scanning Configuration
-################################################################################
-
-variable "manage_registry_scanning_configuration" {
-  description = "Determines whether the registry scanning configuration will be managed"
-  type        = bool
-  default     = false
-}
-
-variable "registry_scan_type" {
-  description = "the scanning type to set for the registry. Can be either `ENHANCED` or `BASIC`"
-  type        = string
-  default     = "ENHANCED"
-}
-
-variable "registry_scan_rules" {
-  description = "One or multiple blocks specifying scanning rules to determine which repository filters are used and at what frequency scanning will occur"
-  type        = any
-  default     = []
-}
-
-################################################################################
-# Registry Replication Configuration
-################################################################################
-
-variable "create_registry_replication_configuration" {
-  description = "Determines whether a registry replication configuration will be created"
-  type        = bool
-  default     = false
-}
-
-variable "registry_replication_rules" {
-  description = "The replication rules for a replication configuration. A maximum of 10 are allowed"
-  type        = any
-  default     = []
-}
 
 variable "environment" {
   description = "Environment name."
@@ -171,18 +12,67 @@ variable "environment" {
 
 variable "service_name" {
   description = "name of the service to add in tags"
-  type = string
-  default = null
+  type        = string
+}
+
+
+variable "karpenter_tag_key" {
+  description = "name of the service to add in tags"
+  type        = string
+  default = "karpenter.sh/discovery"
 }
 
 variable "launched_by" {
   description = "name of the user who is launching the cluster for adding in tags"
-  type = string
-  default = null
+  type        = string
 }
+
 
 variable "team_name" {
   description = "name of the team to add in tags"
+  type        = string
+}
+
+variable "cluster_version" {
+  description = "version of the cluster"
+  type        = string
+}
+
+variable "vpc_id" {
+  description = "ID of the VPC where the cluster security group will be provisioned"
+  type        = string
+}
+
+variable "subnet_ids" {
+  description = "List of subnet IDs. Must be in at least two different availability zones."
+  type        = list(string)
+}
+
+variable "control_plane_subnet_ids" {
+  description = "A list of subnet IDs where the EKS cluster control plane (ENIs) will be provisioned. Used for expanding the pool of subnets used by nodes/node groups without replacing the EKS control plane"
+  type        = list(string)
+}
+
+variable "eks_managed_node_groups" {
+  description = "Map of EKS managed node group definitions to create"
+  type        = any
+  default     = {}
+}
+
+variable "aws_auth_users" {
+  description = " list of aws user mappings to add in aws_auth config map"
+  type = any
+  default = []
+}
+
+variable "aws_auth_roles" {
+  description = " list of aws role mappings to add in aws_auth config map"
+  type = any
+  default = []
+}
+
+variable "JenkinsTerraformDeploymentAdminRole" {
+  description = "JenkinsTerraformDeploymentAdminRole used for environment cluster is deployed to"
   type = string
   default = null
 }
