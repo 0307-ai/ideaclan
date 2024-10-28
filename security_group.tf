@@ -1,19 +1,13 @@
-locals {
-  create_security_group = var.create_lb && var.create_security_group && var.load_balancer_type == "application"
-  security_group_name    = "${local.region}-${var.environment}-${var.security_group_name}-sg"
-}
-
 resource "aws_security_group" "this" {
-  count = local.create_security_group ? 1 : 0
+  count = var.create_function && var.create_security_group ? 1 : 0
 
-  name        = var.security_group_use_name_prefix ? null : local.security_group_name
-  name_prefix = var.security_group_use_name_prefix ? "${local.security_group_name}-" : null
+  name        = var.security_group_name
   description = var.security_group_description
   vpc_id      = var.vpc_id
 
   tags = merge(
     local.tags,
-    { "Name" = local.security_group_name },
+    { "Name" = var.security_group_name },
   )
 
   lifecycle {
@@ -22,7 +16,7 @@ resource "aws_security_group" "this" {
 }
 
 resource "aws_security_group_rule" "this" {
-  for_each = { for k, v in var.security_group_rules : k => v if local.create_security_group }
+  for_each = { for k, v in var.security_group_rules : k => v if var.create_security_group }
 
   # Required
   security_group_id = aws_security_group.this[0].id

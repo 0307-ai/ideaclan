@@ -1,94 +1,142 @@
-data "aws_partition" "current" {}
-data "aws_caller_identity" "current" {}
-data "aws_region" "current" {}
-
 locals {
-  account_id          = data.aws_caller_identity.current.account_id
-  partition           = data.aws_partition.current.partition
-  dns_suffix          = data.aws_partition.current.dns_suffix
-  region              = data.aws_region.current.name
-  tags = {
-    service_name = var.service_name
-    team_name    = var.team_name
-    environment  = var.environment
-    launched_by  = var.launched_by
-  }
+  create_role = var.create_function && var.create_role
+  role_name   = local.create_role ? coalesce(var.role_name, local.function_name, "*") : null
+  policy_name = coalesce(var.policy_name, local.role_name, "*")
+
+  # IAM Role trusted entities is a list of any (allow strings (services) and maps (type+identifiers))
+  trusted_entities_services = distinct(compact(concat(
+    ["lambda.amazonaws.com"],
+    [for service in var.trusted_entities : try(tostring(service), "")]
+  )))
+
+  trusted_entities_principals = [
+    for principal in var.trusted_entities : {
+      type        = principal.type
+      identifiers = tolist(principal.identifiers)
+    }
+    if !can(tostring(principal))
+  ]
 }
 
-data "aws_iam_policy_document" "this" {
-  count = var.create_role ? 1 : 0
+###########
+# IAM role
+###########
 
-  dynamic "statement" {
-    # https://aws.amazon.com/blogs/security/announcing-an-update-to-iam-role-trust-policy-behavior/
-    for_each = var.allow_self_assume_role ? [1] : []
+data "aws_iam_policy_document" "assume_role" {
+  count = local.create_role ? 1 : 0
 
-    content {
-      sid     = "ExplicitSelfRoleAssumption"
-      effect  = "Allow"
-      actions = ["sts:AssumeRole"]
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
 
-      principals {
-        type        = "AWS"
-        identifiers = ["*"]
-      }
+    principals {
+      type        = "Service"
+      identifiers = local.trusted_entities_services
+    }
 
-      condition {
-        test     = "ArnLike"
-        variable = "aws:PrincipalArn"
-        values   = ["arn:${local.partition}:iam::${local.account_id}:role${var.role_path}${var.role_name}"]
+    dynamic "principals" {
+      for_each = local.trusted_entities_principals
+      content {
+        type        = principals.value.type
+        identifiers = principals.value.identifiers
       }
     }
   }
 
-  statement {
-      effect  = "Allow"
-      actions = ["sts:AssumeRoleWithWebIdentity"]
+  dynamic "statement" {
+    for_each = var.assume_role_policy_statements
 
-      principals {
-        type        = "Federated"
-        identifiers = ["arn:aws:iam::${local.account_id}:oidc-provider/oidc.eks.${local.region}.amazonaws.com/id/${var.oidc_id}"]
+    content {
+      sid         = try(statement.value.sid, replace(statement.key, "/[^0-9A-Za-z]*/", ""))
+      effect      = try(statement.value.effect, null)
+      actions     = try(statement.value.actions, null)
+      not_actions = try(statement.value.not_actions, null)
+
+      dynamic "principals" {
+        for_each = try(statement.value.principals, [])
+        content {
+          type        = principals.value.type
+          identifiers = principals.value.identifiers
+        }
       }
 
-      condition {
-        test     = var.assume_role_condition_test
-        variable = "oidc.eks.${local.region}.amazonaws.com/id/${var.oidc_id}:sub"
-        values   = ["system:serviceaccount:${var.service_account_namespace}:${var.service_account_name}"]
+      dynamic "not_principals" {
+        for_each = try(statement.value.not_principals, [])
+        content {
+          type        = not_principals.value.type
+          identifiers = not_principals.value.identifiers
+        }
       }
 
-      # https://aws.amazon.com/premiumsupport/knowledge-center/eks-troubleshoot-oidc-and-irsa/?nc1=h_ls
-      condition {
-        test     = var.assume_role_condition_test
-        variable = "oidc.eks.${local.region}.amazonaws.com/id/${var.oidc_id}:aud"
-        values   = ["sts.amazonaws.com"]
+      dynamic "condition" {
+        for_each = try(statement.value.condition, [])
+        content {
+          test     = condition.value.test
+          variable = condition.value.variable
+          values   = condition.value.values
+        }
       }
+    }
   }
 }
 
-resource "aws_iam_role" "this" {
-  count = var.create_role ? 1 : 0
+resource "aws_iam_role" "lambda" {
+  count = local.create_role ? 1 : 0
 
-  name        = var.role_name
-  path        = var.role_path
-  description = var.role_description
+  name                  = local.role_name
+  description           = var.role_description
+  path                  = var.role_path
+  force_detach_policies = var.role_force_detach_policies
+  permissions_boundary  = var.role_permissions_boundary
+  assume_role_policy    = data.aws_iam_policy_document.assume_role[0].json
+  max_session_duration  = var.role_maximum_session_duration
 
-  assume_role_policy    = data.aws_iam_policy_document.this[0].json
-  max_session_duration  = var.max_session_duration
-  permissions_boundary  = var.role_permissions_boundary_arn
-  force_detach_policies = var.force_detach_policies
-
-  tags = local.tags
+  tags = merge(local.tags, var.role_tags)
 }
 
-resource "aws_iam_role_policy_attachment" "this" {
-  count = length(var.role_policy_arns)
+###########################
+# Additional policy (JSON)
+###########################
 
-  role       = aws_iam_role.this[0].name
-  policy_arn = element(var.role_policy_arns, count.index)
+resource "aws_iam_policy" "additional_json" {
+  count = local.create_role && var.attach_policy_json ? 1 : 0
+
+  name   = local.policy_name
+  path   = var.policy_path
+  policy = var.policy_json
+  tags   = local.tags
 }
 
-resource "aws_iam_role_policy_attachment" "custom" {
-  count = var.create_role &&  var.create_custom_policy ? 1 : 0
+resource "aws_iam_role_policy_attachment" "additional_json" {
+  count = local.create_role && var.attach_policy_json ? 1 : 0
 
-  role       = aws_iam_role.this[0].name
-  policy_arn = aws_iam_policy.policy[0].arn
+  role       = aws_iam_role.lambda[0].name
+  policy_arn = aws_iam_policy.additional_json[0].arn
+}
+
+######
+# VPC
+######
+
+# Copying AWS managed policy to be able to attach the same policy with multiple roles without overwrites by another function
+data "aws_iam_policy" "vpc" {
+  count = local.create_role && var.attach_network_policy ? 1 : 0
+
+  arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AWSLambdaENIManagementAccess"
+}
+
+resource "aws_iam_policy" "vpc" {
+  count = local.create_role && var.attach_network_policy ? 1 : 0
+
+  name   = "${local.policy_name}-vpc"
+  path   = var.policy_path
+  policy = data.aws_iam_policy.vpc[0].policy
+  tags   = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "vpc" {
+  count = local.create_role && var.attach_network_policy ? 1 : 0
+
+  role       = aws_iam_role.lambda[0].name
+  policy_arn = aws_iam_policy.vpc[0].arn
 }

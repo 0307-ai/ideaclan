@@ -1,7 +1,89 @@
-variable "create" {
-  description = "Determines whether resources will be created (affects all resources)"
+variable "create_function" {
+  description = "Controls whether Lambda Function resource should be created"
   type        = bool
   default     = true
+}
+
+variable "create_role" {
+  description = "Controls whether IAM role for Lambda Function should be created"
+  type        = bool
+  default     = true
+}
+
+###########
+# Function
+###########
+
+variable "function_name" {
+  description = "A unique name for your Lambda Function"
+  type        = string
+  default     = ""
+}
+
+variable "handler" {
+  description = "Lambda Function entrypoint in your code"
+  type        = string
+  default     = ""
+}
+
+variable "runtime" {
+  description = "Lambda Function runtime"
+  type        = string
+  default     = ""
+}
+
+variable "lambda_role" {
+  description = " IAM role ARN attached to the Lambda Function. This governs both who / what can invoke your Lambda Function, as well as what resources our Lambda Function has access to. See Lambda Permission Model for more details."
+  type        = string
+  default     = ""
+}
+
+variable "description" {
+  description = "Description of your Lambda Function (or Layer)"
+  type        = string
+  default     = ""
+}
+
+variable "kms_key_arn" {
+  description = "The ARN of KMS key to use by your Lambda Function"
+  type        = string
+  default     = null
+}
+
+variable "memory_size" {
+  description = "Amount of memory in MB your Lambda Function can use at runtime. Valid value between 128 MB to 10,240 MB (10 GB), in 64 MB increments."
+  type        = number
+  default     = 128
+}
+
+variable "publish" {
+  description = "Whether to publish creation/change as new Lambda Function Version."
+  type        = bool
+  default     = false
+}
+
+variable "timeout" {
+  description = "The amount of time your Lambda Function has to run in seconds."
+  type        = number
+  default     = 3
+}
+
+variable "environment_variables" {
+  description = "A map that defines environment variables for the Lambda Function."
+  type        = map(string)
+  default     = {}
+}
+
+variable "vpc_subnet_ids" {
+  description = "List of subnet ids when Lambda Function should run in the VPC. Usually private or intra subnets."
+  type        = list(string)
+  default     = null
+}
+
+variable "vpc_security_group_ids" {
+  description = "List of security group ids when Lambda Function should run in the VPC."
+  type        = list(string)
+  default     = null
 }
 
 variable "environment" {
@@ -24,150 +106,156 @@ variable "team_name" {
   type = string
 }
 
-################################################################################
-# Secret
-################################################################################
-
-variable "description" {
-  description = "A description of the secret"
-  type        = string
-  default     = null
-}
-
-variable "force_overwrite_replica_secret" {
-  description = "Accepts boolean value to specify whether to overwrite a secret with the same name in the destination Region"
-  type        = bool
-  default     = null
-}
-
-variable "kms_key_id" {
-  description = "ARN or Id of the AWS KMS key to be used to encrypt the secret values in the versions stored in this secret. If you need to reference a CMK in a different account, you can use only the key ARN. If you don't specify this value, then Secrets Manager defaults to using the AWS account's default KMS key (the one named `aws/secretsmanager`"
-  type        = string
-  default     = null
-}
-
-variable "name" {
-  description = "Friendly name of the new secret. The secret name can consist of uppercase letters, lowercase letters, digits, and any of the following characters: `/_+=.@-`"
-  type        = string
-  default     = null
-}
-
-variable "name_prefix" {
-  description = "Creates a unique name beginning with the specified prefix"
-  type        = string
-  default     = null
-}
-
-variable "recovery_window_in_days" {
-  description = "Number of days that AWS Secrets Manager waits before it can delete the secret. This value can be `0` to force deletion without recovery or range from `7` to `30` days. The default value is `30`"
-  type        = number
-  default     = null
-}
-
-variable "replica" {
-  description = "Configuration block to support secret replication"
-  type        = map(any)
+variable "timeouts" {
+  description = "Define maximum timeout for creating, updating, and deleting Lambda Function resources"
+  type        = map(string)
   default     = {}
 }
 
-################################################################################
-# Policy
-################################################################################
-
-variable "create_policy" {
-  description = "Determines whether a policy will be created"
-  type        = bool
-  default     = false
+variable "package_path" {
+  description = "name of the package file to use"
+  type = string
+  default = null
 }
 
-variable "source_policy_documents" {
-  description = "List of IAM policy documents that are merged together into the exported document. Statements must have unique `sid`s"
-  type        = list(string)
-  default     = []
-}
+############################################
+# Lambda Permissions (for allowed triggers)
+############################################
 
-variable "override_policy_documents" {
-  description = "List of IAM policy documents that are merged together into the exported document. In merging, statements with non-blank `sid`s will override statements with the same `sid`"
-  type        = list(string)
-  default     = []
-}
-
-variable "policy_statements" {
-  description = "A map of IAM policy [statements](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document#statement) for custom permission usage"
-  type        = map(any)
-  default     = {}
-}
-
-variable "block_public_policy" {
-  description = "Makes an optional API call to Zelkova to validate the Resource Policy to prevent broad access to your secret"
-  type        = bool
-  default     = null
-}
-
-################################################################################
-# Version
-################################################################################
-
-variable "ignore_secret_changes" {
-  description = "Determines whether or not Terraform will ignore changes made externally to `secret_string` or `secret_binary`. Changing this value after creation is a destructive operation"
+variable "create_current_version_allowed_triggers" {
+  description = "Whether to allow triggers on current version of Lambda Function (this will revoke permissions from previous version because Terraform manages only current resources)"
   type        = bool
   default     = true
 }
 
-variable "secret_string" {
-  description = "Specifies text data that you want to encrypt and store in this version of the secret. This is required if `secret_binary` is not set"
-  type        = string
-  default     = null
-}
-
-variable "secret_binary" {
-  description = "Specifies binary data that you want to encrypt and store in this version of the secret. This is required if `secret_string` is not set. Needs to be encoded to base64"
-  type        = string
-  default     = null
-}
-
-variable "version_stages" {
-  description = "Specifies a list of staging labels that are attached to this version of the secret. A staging label must be unique to a single version of the secret"
-  type        = list(string)
-  default     = null
-}
-
-variable "create_random_password" {
-  description = "Determines whether a random password will be generated"
-  type        = bool
-  default     = false
-}
-
-variable "random_password_length" {
-  description = "The length of the generated random password"
-  type        = number
-  default     = 32
-}
-
-variable "random_password_override_special" {
-  description = "Supply your own list of special characters to use for string generation. This overrides the default character list in the special argument"
-  type        = string
-  default     = "!@#$%&*()-_=+[]{}<>:?"
-}
-
-################################################################################
-# Rotation
-################################################################################
-
-variable "enable_rotation" {
-  description = "Determines whether secret rotation is enabled"
-  type        = bool
-  default     = false
-}
-
-variable "rotation_lambda_arn" {
-  description = "Specifies the ARN of the Lambda function that can rotate the secret"
-  type        = string
-  default     = ""
-}
-
-variable "rotation_rules" {
-  description = "A structure that defines the rotation configuration for this secret"
+variable "allowed_triggers" {
+  description = "Map of allowed triggers to create Lambda permissions"
   type        = map(any)
+  default     = {}
+}
+
+######
+# IAM
+######
+
+variable "role_name" {
+  description = "Name of IAM role to use for Lambda Function"
+  type        = string
+  default     = null
+}
+
+variable "role_description" {
+  description = "Description of IAM role to use for Lambda Function"
+  type        = string
+  default     = null
+}
+
+variable "role_path" {
+  description = "Path of IAM role to use for Lambda Function"
+  type        = string
+  default     = null
+}
+
+variable "role_force_detach_policies" {
+  description = "Specifies to force detaching any policies the IAM role has before destroying it."
+  type        = bool
+  default     = true
+}
+
+variable "role_permissions_boundary" {
+  description = "The ARN of the policy that is used to set the permissions boundary for the IAM role used by Lambda Function"
+  type        = string
+  default     = null
+}
+
+variable "role_tags" {
+  description = "A map of tags to assign to IAM role"
+  type        = map(string)
+  default     = {}
+}
+
+variable "role_maximum_session_duration" {
+  description = "Maximum session duration, in seconds, for the IAM role"
+  type        = number
+  default     = 3600
+}
+
+###########
+# Policies
+###########
+
+variable "policy_name" {
+  description = "IAM policy name. It override the default value, which is the same as role_name"
+  type        = string
+  default     = null
+}
+
+variable "trusted_entities" {
+  description = "List of additional trusted entities for assuming Lambda Function role (trust relationship)"
+  type        = any
+  default     = []
+}
+
+variable "assume_role_policy_statements" {
+  description = "Map of dynamic policy statements for assuming Lambda Function role (trust relationship)"
+  type        = any
+  default     = {}
+}
+
+variable "attach_policy_json" {
+  description = "Controls whether policy_json should be added to IAM role for Lambda Function"
+  type        = bool
+  default     = false
+}
+
+variable "policy_path" {
+  description = "Path of policies to that should be added to IAM role for Lambda Function"
+  type        = string
+  default     = null
+}
+
+variable "policy_json" {
+  description = "An additional policy document as JSON to attach to the Lambda Function role"
+  type        = string
+  default     = null
+}
+
+variable "attach_network_policy" {
+  description = "true is lambda is being created inside vpc"
+  type = bool
+  default = false
+}
+
+################################################################################
+# Security Group
+################################################################################
+
+variable "create_security_group" {
+  description = "Whether to create this resource or not?"
+  type        = bool
+  default     = false
+}
+
+variable "security_group_name" {
+  description = "Name of VPC security group to associate"
+  type        = string
+  default     = null
+}
+
+variable "security_group_description" {
+  description = "Description of VPC security group"
+  type        = string
+  default     = null
+}
+
+variable "vpc_id" {
+  description = "VPC ID"
+  type        = string
+  default     = null
+}
+
+variable "security_group_rules" {
+  description = "Security group rules to add to the security group created"
+  type        = any
   default     = {}
 }

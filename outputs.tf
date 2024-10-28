@@ -1,27 +1,41 @@
-################################################################################
-# Secret
-################################################################################
-
-output "secret_arn" {
-  description = "The ARN of the secret"
-  value       = try(aws_secretsmanager_secret.this[0].arn, null)
+# Lambda Function
+output "lambda_function_arn" {
+  description = "The ARN of the Lambda Function"
+  value       = try(aws_lambda_function.this[0].arn, "")
 }
 
-output "secret_id" {
-  description = "The ID of the secret"
-  value       = try(aws_secretsmanager_secret.this[0].id, null)
+output "lambda_function_invoke_arn" {
+  description = "The Invoke ARN of the Lambda Function"
+  value       = try(aws_lambda_function.this[0].invoke_arn, "")
 }
 
-output "secret_replica" {
-  description = "Attributes of the replica created"
-  value       = try(aws_secretsmanager_secret.this[0].replica, null)
+output "lambda_function_name" {
+  description = "The name of the Lambda Function"
+  value       = try(aws_lambda_function.this[0].function_name, "")
 }
 
-################################################################################
-# Version
-################################################################################
+output "lambda_function_qualified_arn" {
+  description = "The ARN identifying your Lambda Function Version"
+  value       = try(aws_lambda_function.this[0].qualified_arn, "")
+}
 
-output "secret_version_id" {
-  description = "The unique identifier of the version of the secret"
-  value       = try(aws_secretsmanager_secret_version.this[0].version_id, aws_secretsmanager_secret_version.ignore_changes[0].version_id, null)
+output "lambda_function_qualified_invoke_arn" {
+  description = "The Invoke ARN identifying your Lambda Function Version"
+  value       = try(aws_lambda_function.this[0].qualified_invoke_arn, "")
+}
+
+# IAM Role
+output "lambda_role_arn" {
+  description = "The ARN of the IAM role created for the Lambda Function"
+  value       = try(aws_iam_role.lambda[0].arn, "")
+}
+
+output "lambda_role_name" {
+  description = "The name of the IAM role created for the Lambda Function"
+  value       = try(aws_iam_role.lambda[0].name, "")
+}
+
+output "security_group_id" {
+  description = "The security group name"
+  value       = try(aws_security_group.this[0].id, null)
 }

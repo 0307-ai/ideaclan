@@ -5,28 +5,27 @@ import boto3
 import json
 import logging
 import os
-import pymysql
+import time
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
 def lambda_handler(event, context):
-    """Secrets Manager RDS MySQL Handler
+    """Secrets Manager Elasticache User Handler
 
-    This handler uses the single-user rotation scheme to rotate an RDS MySQL user credential. This rotation scheme
-    logs into the database as the user and rotates the user's own password, immediately invalidating the user's
-    previous password.
+    This handler rotates ElastiCache user password. Once executed it creates a new version of
+    a Secret with a generated password and calls ElastiCache modify user API to update user password.
+    As soon as changes get applied and user state became ‘active’, the new password could be used to
+    authentication with Cache clusters.
 
-    The Secret SecretString is expected to be a JSON string with the following format:
-    {
-        'engine': <required: must be set to 'mysql'>,
-        'host': <required: instance host name>,
-        'username': <required: username>,
-        'password': <required: password>,
-        'dbname': <optional: database name>,
-        'port': <optional: if not specified, default port 3306 will be used>
-    }
+    We recommend paying special attention to Lambda function permissions to prevent privilege escalation
+    and use one Lambda function to rotate a single secret.
+
+    Required Lambda function environment variables are the following:
+        - SECRETS_MANAGER_ENDPOINT: The service endpoint of secrets manager, for example https://secretsmanager.us-east-1.amazonaws.com
+        - SECRET_ARN: The ARN of secret created in Secrets Manager
+        - USER_NAME: Username of the ElastiCache user
 
     Args:
         event (dict): Lambda dictionary of event parameters. These keys must include the following:
@@ -39,370 +38,244 @@ def lambda_handler(event, context):
     Raises:
         ResourceNotFoundException: If the secret with the specified arn and stage does not exist
 
+        UserNotFoundFault: If the user associated to the secret does not exist
+
         ValueError: If the secret is not properly configured for rotation
 
-        KeyError: If the secret json does not contain the expected keys
+        KeyError: If the event parameters do not contain the expected keys
 
     """
-    arn = event['SecretId']
+    secret_arn = event['SecretId']
     token = event['ClientRequestToken']
     step = event['Step']
+    env_secret_arn = secret_arn
+    if secret_arn != env_secret_arn:
+        logger.error("Secret %s is not allowed to use this Lambda function for rotation" % secret_arn)
+        raise ValueError("Secret %s is not allowed to use this Lambda function for rotation" % secret_arn)
 
-    # Setup the client
-    service_client = boto3.client('secretsmanager', endpoint_url=os.environ['SECRETS_MANAGER_ENDPOINT'])
+    # Setup the clients
+    secrets_manager_service_client = boto3.client('secretsmanager', endpoint_url=os.environ['SECRETS_MANAGER_ENDPOINT'])
 
     # Make sure the version is staged correctly
-    metadata = service_client.describe_secret(SecretId=arn)
-    if "RotationEnabled" in metadata and not metadata['RotationEnabled']:
-        logger.error("Secret %s is not enabled for rotation" % arn)
-        raise ValueError("Secret %s is not enabled for rotation" % arn)
+    metadata = secrets_manager_service_client.describe_secret(SecretId=secret_arn)
+    if not metadata['RotationEnabled']:
+        logger.error("Secret %s is not enabled for rotation" % secret_arn)
+        raise ValueError("Secret %s is not enabled for rotation" % secret_arn)
     versions = metadata['VersionIdsToStages']
     if token not in versions:
-        logger.error("Secret version %s has no stage for rotation of secret %s." % (token, arn))
-        raise ValueError("Secret version %s has no stage for rotation of secret %s." % (token, arn))
+        logger.error("Secret version %s has no stage for rotation of secret %s." % (token, secret_arn))
+        raise ValueError("Secret version %s has no stage for rotation of secret %s." % (token, secret_arn))
     if "AWSCURRENT" in versions[token]:
-        logger.info("Secret version %s already set as AWSCURRENT for secret %s." % (token, arn))
+        logger.info("Secret version %s already set as AWSCURRENT for secret %s." % (token, secret_arn))
         return
     elif "AWSPENDING" not in versions[token]:
-        logger.error("Secret version %s not set as AWSPENDING for rotation of secret %s." % (token, arn))
-        raise ValueError("Secret version %s not set as AWSPENDING for rotation of secret %s." % (token, arn))
+        logger.error("Secret version %s not set as AWSPENDING for rotation of secret %s." % (token, secret_arn))
+        raise ValueError("Secret version %s not set as AWSPENDING for rotation of secret %s." % (token, secret_arn))
 
-    # Call the appropriate step
     if step == "createSecret":
-        create_secret(service_client, arn, token)
-
+        create_secret(secrets_manager_service_client, secret_arn, token)
     elif step == "setSecret":
-        set_secret(service_client, arn, token)
-
+        set_secret(secrets_manager_service_client, secret_arn, token)
     elif step == "testSecret":
-        test_secret(service_client, arn, token)
-
+        test_secret(secrets_manager_service_client, secret_arn)
     elif step == "finishSecret":
-        finish_secret(service_client, arn, token)
-
+        finish_secret(secrets_manager_service_client, secret_arn, token)
     else:
-        logger.error("lambda_handler: Invalid step parameter %s for secret %s" % (step, arn))
-        raise ValueError("Invalid step parameter %s for secret %s" % (step, arn))
+        logger.error("lambda_handler: Invalid step parameter %s for secret %s" % (step, secret_arn))
+        raise ValueError("Invalid step parameter %s for secret %s" % (step, secret_arn))
 
 
-def create_secret(service_client, arn, token):
-    """Generate a new secret
+def create_secret(secrets_manager_service_client, secret_arn, token):
+    """Create the secret
 
     This method first checks for the existence of a secret for the passed in token. If one does not exist, it will generate a
     new secret and put it with the passed in token.
 
     Args:
-        service_client (client): The secrets manager service client
+        secrets_manager_service_client (client): The secrets manager service client
 
-        arn (string): The secret ARN or other identifier
+        secret_arn (string): The secret ARN or other identifier
 
         token (string): The ClientRequestToken associated with the secret version
 
     Raises:
-        ValueError: If the current secret is not valid JSON
-
-        KeyError: If the secret json does not contain the expected keys
+        ResourceNotFoundException: If the secret with the specified arn and stage does not exist
 
     """
     # Make sure the current secret exists
-    current_dict = get_secret_dict(service_client, arn, "AWSCURRENT")
+    current_secret = get_secret_dict(secrets_manager_service_client, secret_arn, "AWSCURRENT")
+    # Verify if the username stored in environment variable is the same with the one stored in current_secret
+    verify_user_name(current_secret)
+
+    user_context = resource_arn_to_context(current_secret["user_arn"])
+    elasticache_service_client = boto3.client('elasticache', region_name=user_context["region"])
+
+    # validates if user exists
+    elasticache_service_client.describe_users(UserId=user_context["resource"])
 
     # Now try to get the secret version, if that fails, put a new secret
     try:
-        get_secret_dict(service_client, arn, "AWSPENDING", token)
-        logger.info("createSecret: Successfully retrieved secret for %s." % arn)
-    except service_client.exceptions.ResourceNotFoundException:
-        # Get exclude characters from environment variable
-        password_length = 16
+        secrets_manager_service_client.get_secret_value(SecretId=secret_arn, VersionId=token, VersionStage="AWSPENDING")
+        logger.info("createSecret: Successfully retrieved secret for %s." % secret_arn)
+    except secrets_manager_service_client.exceptions.ResourceNotFoundException:
+        # Get password length from environment variable
+        password_length = 20
         include_uppercase = False
-        include_symbols = False
-        exclude_characters = '"/\\@\''
+        
         # Generate a random password
-        passwd = service_client.get_random_password(
-            PasswordLength=password_length,
-            ExcludeNumbers=False,
-            ExcludePunctuation=True,
-            ExcludeUppercase=not include_uppercase,
-            ExcludeLowercase=False,
-            ExcludeCharacters=exclude_characters
-        )
-        current_dict['password'] = passwd['RandomPassword']
+        passwd = secrets_manager_service_client.get_random_password(ExcludeCharacters='"/\\@\'', PasswordLength=password_length, ExcludePunctuation=True, ExcludeUppercase=not include_uppercase, ExcludeLowercase=False, ExcludeNumbers=False)
+        current_secret['password'] = passwd['RandomPassword']
 
         # Put the secret
-        service_client.put_secret_value(SecretId=arn, ClientRequestToken=token, SecretString=json.dumps(current_dict), VersionStages=['AWSPENDING'])
-        logger.info("createSecret: Successfully put secret for ARN %s and version %s." % (arn, token))
+        secrets_manager_service_client.put_secret_value(SecretId=secret_arn, ClientRequestToken=token, SecretString=json.dumps(current_secret),
+                                                        VersionStages=['AWSPENDING'])
+        logger.info("createSecret: Successfully put secret for ARN %s and version %s." % (secret_arn, token))
 
 
-def set_secret(service_client, arn, token):
-    """Set the pending secret in the database
+def set_secret(secrets_manager_service_client, secret_arn, token):
+    """Set the secret
 
-    This method tries to login to the database with the AWSPENDING secret and returns on success. If that fails, it
-    tries to login with the AWSCURRENT and AWSPREVIOUS secrets. If either one succeeds, it sets the AWSPENDING password
-    as the user password in the database. Else, it throws a ValueError.
+    This method waits for elasticache user to be in a modifiable state ('active'), and set the AWSPENDING and AWSCURRENT secrets in the user.
 
     Args:
-        service_client (client): The secrets manager service client
+        secrets_manager_service_client (client): The secrets manager service client
 
-        arn (string): The secret ARN or other identifier
+        secret_arn (string): The secret ARN or other identifier
 
         token (string): The ClientRequestToken associated with the secret version
 
     Raises:
-        ResourceNotFoundException: If the secret with the specified arn and stage does not exist
-
-        ValueError: If the secret is not valid JSON or valid credentials are found to login to the database
-
-        KeyError: If the secret json does not contain the expected keys
+        UserNotFoundFault: If the user associated to the secret does not exist
 
     """
-    try:
-        previous_dict = get_secret_dict(service_client, arn, "AWSPREVIOUS")
-    except (service_client.exceptions.ResourceNotFoundException, KeyError):
-        previous_dict = None
-    current_dict = get_secret_dict(service_client, arn, "AWSCURRENT")
-    pending_dict = get_secret_dict(service_client, arn, "AWSPENDING", token)
+    # Make sure the current secret exists
+    current_secret = get_secret_dict(secrets_manager_service_client, secret_arn, "AWSCURRENT")
+    pending_secret = get_secret_dict(secrets_manager_service_client, secret_arn, "AWSPENDING", token)
+    user_context = resource_arn_to_context(current_secret["user_arn"])
 
-    # First try to login with the pending secret, if it succeeds, return
-    conn = get_connection(pending_dict)
-    if conn:
-        conn.close()
-        logger.info("setSecret: AWSPENDING secret is already set as password in MySQL DB for secret arn %s." % arn)
-        return
+    # Verify if the username stored in environment variable is the same with the one stored in pending_secret
+    verify_user_name(pending_secret)
 
-    # Make sure the user from current and pending match
-    if current_dict['username'] != pending_dict['username']:
-        logger.error("setSecret: Attempting to modify user %s other than current user %s" % (pending_dict['username'], current_dict['username']))
-        raise ValueError("Attempting to modify user %s other than current user %s" % (pending_dict['username'], current_dict['username']))
+    passwords = [pending_secret["password"]]
+    # During the first rotation the password might not be present in the current version
+    if "password" in current_secret:
+        passwords.append(current_secret["password"])
 
-    # Make sure the host from current and pending match
-    if current_dict['host'] != pending_dict['host']:
-        logger.error("setSecret: Attempting to modify user for host %s other than current host %s" % (pending_dict['host'], current_dict['host']))
-        raise ValueError("Attempting to modify user for host %s other than current host %s" % (pending_dict['host'], current_dict['host']))
-
-    # Now try the current password
-    conn = get_connection(current_dict)
-
-    # If both current and pending do not work, try previous
-    if not conn and previous_dict:
-        # Update previous_dict to leverage current SSL settings
-        previous_dict.pop('ssl', None)
-        if 'ssl' in current_dict:
-            previous_dict['ssl'] = current_dict['ssl']
-
-        conn = get_connection(previous_dict)
-
-        # Make sure the user/host from previous and pending match
-        if previous_dict['username'] != pending_dict['username']:
-            logger.error("setSecret: Attempting to modify user %s other than previous valid user %s" % (pending_dict['username'], previous_dict['username']))
-            raise ValueError("Attempting to modify user %s other than previous valid user %s" % (pending_dict['username'], previous_dict['username']))
-        if previous_dict['host'] != pending_dict['host']:
-            logger.error("setSecret: Attempting to modify user for host %s other than previous host %s" % (pending_dict['host'], previous_dict['host']))
-            raise ValueError("Attempting to modify user for host %s other than previous host %s" % (pending_dict['host'], previous_dict['host']))
-
-    # If we still don't have a connection, raise a ValueError
-    if not conn:
-        logger.error("setSecret: Unable to log into database with previous, current, or pending secret of secret arn %s" % arn)
-        raise ValueError("Unable to log into database with previous, current, or pending secret of secret arn %s" % arn)
-
-    # Now set the password to the pending password
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT VERSION()")
-            ver = cur.fetchone()
-            password_option = get_password_option(ver[0])
-            cur.execute("SET PASSWORD = " + password_option, pending_dict['password'])
-            conn.commit()
-            logger.info("setSecret: Successfully set password for user %s in MySQL DB for secret arn %s." % (pending_dict['username'], arn))
-    finally:
-        conn.close()
+    # creating elasticache client
+    elasticache_service_client = boto3.client('elasticache', region_name=user_context["region"])
+    # wait user to be in a modifiable state
+    user = wait_for_user_be_active("setSecret", elasticache_service_client, user_context["resource"], secret_arn)
+    # update user passwords
+    elasticache_service_client.modify_user(UserId=user["UserId"], Passwords=passwords)
+    logger.info("setSecret: Successfully set password for user %s in elasticache for secret arn %s." % (current_secret["user_arn"], secret_arn))
 
 
-def test_secret(service_client, arn, token):
-    """Test the pending secret against the database
+def test_secret(secrets_manager_service_client, secret_arn):
+    """Test the secret
 
-    This method tries to log into the database with the secrets staged with AWSPENDING and runs
-    a permissions check to ensure the user has the corrrect permissions.
+    This method waits for the elasticache user to be in `active` state. It means that the password was propagated to all associated instances, if any.
 
     Args:
-        service_client (client): The secrets manager service client
+        secrets_manager_service_client (client): The secrets manager service client
 
-        arn (string): The secret ARN or other identifier
+        secret_arn (string): The secret ARN or other identifier
+
+    Raises:
+        UserNotFoundFault: If the user associated to the secret does not exist
+
+    """
+    current_secret = get_secret_dict(secrets_manager_service_client, secret_arn, "AWSCURRENT")
+    user_context = resource_arn_to_context(current_secret["user_arn"])
+    # creating elasticache client
+    elasticache_service_client = boto3.client('elasticache', region_name=user_context["region"])
+    # wait password propagation
+    wait_for_user_be_active("testSecret", elasticache_service_client, user_context["resource"], secret_arn)
+    logger.info("testSecret: User %s is active in elasticache after password update for secret arn %s." % (current_secret["user_arn"], secret_arn))
+
+
+def finish_secret(secrets_manager_service_client, secret_arn, token):
+    """Finish the secret
+
+    This method finalizes the rotation process by marking the secret version passed in as the AWSCURRENT secret.
+
+    Args:
+        secrets_manager_service_client (client): The secrets manager service client
+
+        secret_arn (string): The secret ARN or other identifier
 
         token (string): The ClientRequestToken associated with the secret version
 
     Raises:
-        ResourceNotFoundException: If the secret with the specified arn and stage does not exist
-
-        ValueError: If the secret is not valid JSON or valid credentials are found to login to the database
-
-        KeyError: If the secret json does not contain the expected keys
-
-    """
-    # Try to login with the pending secret, if it succeeds, return
-    conn = get_connection(get_secret_dict(service_client, arn, "AWSPENDING", token))
-    if conn:
-        # This is where the lambda will validate the user's permissions. Uncomment/modify the below lines to
-        # tailor these validations to your needs
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT NOW()")
-                conn.commit()
-        finally:
-            conn.close()
-
-        logger.info("testSecret: Successfully signed into MySQL DB with AWSPENDING secret in %s." % arn)
-        return
-    else:
-        logger.error("testSecret: Unable to log into database with pending secret of secret ARN %s" % arn)
-        raise ValueError("Unable to log into database with pending secret of secret ARN %s" % arn)
-
-
-def finish_secret(service_client, arn, token):
-    """Finish the rotation by marking the pending secret as current
-
-    This method finishes the secret rotation by staging the secret staged AWSPENDING with the AWSCURRENT stage.
-
-    Args:
-        service_client (client): The secrets manager service client
-
-        arn (string): The secret ARN or other identifier
-
-        token (string): The ClientRequestToken associated with the secret version
+        ResourceNotFoundException: If the secret with the specified arn does not exist
 
     """
     # First describe the secret to get the current version
-    metadata = service_client.describe_secret(SecretId=arn)
+    metadata = secrets_manager_service_client.describe_secret(SecretId=secret_arn)
     current_version = None
     for version in metadata["VersionIdsToStages"]:
         if "AWSCURRENT" in metadata["VersionIdsToStages"][version]:
             if version == token:
                 # The correct version is already marked as current, return
-                logger.info("finishSecret: Version %s already marked as AWSCURRENT for %s" % (version, arn))
+                logger.info("finishSecret: Version %s already marked as AWSCURRENT for %s" % (version, secret_arn))
                 return
             current_version = version
             break
 
     # Finalize by staging the secret version current
-    service_client.update_secret_version_stage(SecretId=arn, VersionStage="AWSCURRENT", MoveToVersionId=token, RemoveFromVersionId=current_version)
-    logger.info("finishSecret: Successfully set AWSCURRENT stage to version %s for secret %s." % (token, arn))
+    secrets_manager_service_client.update_secret_version_stage(SecretId=secret_arn, VersionStage="AWSCURRENT", MoveToVersionId=token,
+                                                               RemoveFromVersionId=current_version)
+    logger.info("finishSecret: Successfully set AWSCURRENT stage to version %s for secret %s." % (token, secret_arn))
 
 
-def get_connection(secret_dict):
-    """Gets a connection to MySQL DB from a secret dictionary
+def wait_for_user_be_active(step, elasticache_service_client, user_id, secret_arn):
+    """ Waits for user to be in 'active' state
 
-    This helper function uses connectivity information from the secret dictionary to initiate
-    connection attempt(s) to the database. Will attempt a fallback, non-SSL connection when
-    initial connection fails using SSL and fall_back is True.
+    This method calls describe_users api in a loop until it reaches the timeout or the user status is 'active'
 
     Args:
-        secret_dict (dict): The Secret Dictionary
+        step: The current step name
+
+        elasticache_service_client: The elasticache service client
+
+        user_id: The user id
+
+        secret_arn (string): The secret ARN or other identifier
 
     Returns:
-        Connection: The pymysql.connections.Connection object if successful. None otherwise
+        User: The user returned by elasticache service client
 
     Raises:
-        KeyError: If the secret json does not contain the expected keys
+        ValueError: If the user does not get active within the defined time
+
+        UserNotFoundFault: If the user does not exist
 
     """
-    # Parse and validate the secret JSON string
-    port = int(secret_dict['port']) if 'port' in secret_dict else 3306
-    dbname = secret_dict['dbname'] if 'dbname' in secret_dict else None
 
-    # Get SSL connectivity configuration
-    use_ssl, fall_back = get_ssl_config(secret_dict)
+    max_waiting_time = int(os.environ['MAX_WAITING_TIME_FOR_ACTIVE_IN_SECONDS']) if 'MAX_WAITING_TIME_FOR_ACTIVE_IN_SECONDS' in os.environ else 600
+    retry_interval = int(os.environ['WAITING_RETRY_INTERVAL_IN_SECONDS']) if 'WAITING_RETRY_INTERVAL_IN_SECONDS' in os.environ else 10
+    timeout = time.time() + max_waiting_time
 
-    # if an 'ssl' key is not found or does not contain a valid value, attempt an SSL connection and fall back to non-SSL on failure
-    conn = connect_and_authenticate(secret_dict, port, dbname, use_ssl)
-    if conn or not fall_back:
-        return conn
-    else:
-        return connect_and_authenticate(secret_dict, port, dbname, False)
+    while timeout > time.time():
+        user = elasticache_service_client.describe_users(UserId=user_id)["Users"][0]
+        if user["Status"] == "active":
+            logger.info("%s: user %s active, exiting." % (step, user_id))
+            return user
+        logger.info("%s: user %s not active, waiting." % (step, user_id))
+        time.sleep(retry_interval)
 
-
-def get_ssl_config(secret_dict):
-    """Gets the desired SSL and fall back behavior using a secret dictionary
-
-    This helper function uses the existance and value the 'ssl' key in a secret dictionary
-    to determine desired SSL connectivity configuration. Its behavior is as follows:
-        - 'ssl' key DNE or invalid type/value: return True, True
-        - 'ssl' key is bool: return secret_dict['ssl'], False
-        - 'ssl' key equals "true" ignoring case: return True, False
-        - 'ssl' key equals "false" ignoring case: return False, False
-
-    Args:
-        secret_dict (dict): The Secret Dictionary
-
-    Returns:
-        Tuple(use_ssl, fall_back): SSL configuration
-            - use_ssl (bool): Flag indicating if an SSL connection should be attempted
-            - fall_back (bool): Flag indicating if non-SSL connection should be attempted if SSL connection fails
-
-    """
-    # Default to True for SSL and fall_back mode if 'ssl' key DNE
-    if 'ssl' not in secret_dict:
-        return True, True
-
-    # Handle type bool
-    if isinstance(secret_dict['ssl'], bool):
-        return secret_dict['ssl'], False
-
-    # Handle type string
-    if isinstance(secret_dict['ssl'], str):
-        ssl = secret_dict['ssl'].lower()
-        if ssl == "true":
-            return True, False
-        elif ssl == "false":
-            return False, False
-        else:
-            # Invalid string value, default to True for both SSL and fall_back mode
-            return True, True
-
-    # Invalid type, default to True for both SSL and fall_back mode
-    return True, True
+    logger.error("%s: user %s associated with secret %s did not reached the active status." % (step, user_id, secret_arn))
+    raise ValueError("%s: user %s associated with secret %s did not reached the active status." % (step, user_id, secret_arn))
 
 
-def connect_and_authenticate(secret_dict, port, dbname, use_ssl):
-    """Attempt to connect and authenticate to a MySQL instance
-
-    This helper function tries to connect to the database using connectivity info passed in.
-    If successful, it returns the connection, else None
-
-    Args:
-        - secret_dict (dict): The Secret Dictionary
-        - port (int): The databse port to connect to
-        - dbname (str): Name of the database
-        - use_ssl (bool): Flag indicating whether connection should use SSL/TLS
-
-    Returns:
-        Connection: The pymongo.database.Database object if successful. None otherwise
-
-    Raises:
-        KeyError: If the secret json does not contain the expected keys
-
-    """
-    ssl = {'ca': '/etc/pki/tls/cert.pem', } if use_ssl else None
-
-    # Try to obtain a connection to the db
-    try:
-        # Checks hostname and verifies server certificate implictly when 'ca' key is in 'ssl' dictionary
-        conn = pymysql.connect(host=secret_dict['host'], user=secret_dict['username'], password=secret_dict['password'], port=port, database=dbname, connect_timeout=5, ssl=ssl)
-        logger.info("Successfully established %s connection as user '%s' with host: '%s'" % ("SSL/TLS" if use_ssl else "non SSL/TLS", secret_dict['username'], secret_dict['host']))
-        return conn
-    except pymysql.OperationalError as e:
-        if 'certificate verify failed: IP address mismatch' in e.args[1]:
-            logger.error("Hostname verification failed when estlablishing SSL/TLS Handshake with host: %s" % secret_dict['host'])
-        return None
-
-
-def get_secret_dict(service_client, arn, stage, token=None):
-    """Gets the secret dictionary corresponding for the secret arn, stage, and token
+def get_secret_dict(secrets_manager_service_client, secret_arn, stage, token=None):
+    """Gets the secret dictionary corresponding for the secret secret_arn, stage, and token
 
     This helper function gets credentials for the arn and stage passed in and returns the dictionary by parsing the JSON string
 
     Args:
-        service_client (client): The secrets manager service client
+        secrets_manager_service_client (client): The secrets manager service client
 
-        arn (string): The secret ARN or other identifier
+        secret_arn (string): The secret ARN or other identifier
 
         token (string): The ClientRequestToken associated with the secret version, or None if no validation is desired
 
@@ -414,44 +287,61 @@ def get_secret_dict(service_client, arn, stage, token=None):
     Raises:
         ResourceNotFoundException: If the secret with the specified arn and stage does not exist
 
-        ValueError: If the secret is not valid JSON
+        KeyError: If the secret has no user_arn
 
     """
-    required_fields = ['host', 'username', 'password']
-
     # Only do VersionId validation against the stage if a token is passed in
-    if token:
-        secret = service_client.get_secret_value(SecretId=arn, VersionId=token, VersionStage=stage)
+    if token is None:
+        secret = secrets_manager_service_client.get_secret_value(SecretId=secret_arn, VersionStage=stage)
     else:
-        secret = service_client.get_secret_value(SecretId=arn, VersionStage=stage)
+        secret = secrets_manager_service_client.get_secret_value(SecretId=secret_arn, VersionId=token, VersionStage=stage)
     plaintext = secret['SecretString']
-    secret_dict = json.loads(plaintext)
+    try:
+        secret_dict = json.loads(plaintext)
+    except Exception:
+        # wrapping json parser exceptions to avoid possible  password disclosure
+        logger.error("Invalid secret value json for secret %s." % (secret_arn))
+        raise ValueError("Invalid secret value json for secret %s." % (secret_arn))
 
-    # Run validations against the secret
-    if 'engine' not in secret_dict or secret_dict['engine'] != 'mysql':
-        raise KeyError("Database engine must be set to 'mysql' in order to use this rotation lambda")
-    for field in required_fields:
-        if field not in secret_dict:
-            raise KeyError("%s key is missing from secret JSON" % field)
+    # Validates if there is a user associated to the secret
+    if "user_arn" not in secret_dict:
+        logger.error("createSecret: secret %s has no user_arn defined." % (secret_arn))
+        raise KeyError("createSecret: secret %s has no user_arn defined." % (secret_arn))
 
-    # Parse and return the secret JSON string
     return secret_dict
 
 
-def get_password_option(version):
-    """Gets the password option template string to use for the SET PASSWORD sql query
-
-    This helper function takes in the mysql version and returns the appropriate password option template string that can
-    be used in the SET PASSWORD query for that mysql version.
+def resource_arn_to_context(arn):
+    '''Returns a dictionary built based on the user arn
 
     Args:
-        version (string): The mysql database version
-
+        arn (string): The user ARN
     Returns:
-        PasswordOption: The password option string
+        dict: A user arn dictionary with fields present in the arn
+    '''
+    elements = arn.split(':')
+    result = {
+        'arn': elements[0],
+        'partition': elements[1],
+        'service': elements[2],
+        'region': elements[3],
+        'account': elements[4],
+        'resource_type': elements[5],
+        'resource': elements[6]
+    }
+    return result
 
-    """
-    if version.startswith("8"):
-        return "%s"
-    else:
-        return "PASSWORD(%s)"
+
+def verify_user_name(secret):
+    '''Verify whether USER_NAME set in Lambda environment variable matches what's set in the secret
+
+    Args:
+        secret: The secret from Secrets Manager
+    Raises:
+        verificationException: username in Lambda environment variable doesn't match the one stored in the secret
+    '''
+    env_elasticache_user_name = secret["username"]
+    secret_user_name = secret["username"]
+    if env_elasticache_user_name != secret_user_name:
+        logger.error("User %s is not allowed to use this Lambda function for rotation" % secret_user_name)
+        raise ValueError("User %s is not allowed to use this Lambda function for rotation" % secret_user_name)
