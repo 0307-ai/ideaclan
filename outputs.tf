@@ -1,27 +1,16 @@
-################################################################################
-# Key
-################################################################################
-
-output "key_arn" {
-  description = "The Amazon Resource Name (ARN) of the key"
-  value       = try(aws_kms_key.this[0].arn, aws_kms_replica_key.this[0].arn,  null)
+output "broker_id" {
+  description = "The ID of the RabbitMQ broker"
+  value       = aws_mq_broker.rabbitmq.id
 }
 
-output "key_id" {
-  description = "The globally unique identifier for the key"
-  value       = try(aws_kms_key.this[0].key_id, aws_kms_replica_key.this[0].key_id, null)
+output "broker_arn" {
+  description = "The ARN of the RabbitMQ broker"
+  value       = aws_mq_broker.rabbitmq.arn
 }
 
-output "key_policy" {
-  description = "The IAM resource policy set on the key"
-  value       = try(aws_kms_key.this[0].policy, aws_kms_replica_key.this[0].policy, null)
+output "broker_instances" {
+  description = "The instances of the RabbitMQ broker"
+  value       = aws_mq_broker.rabbitmq.instances
 }
 
-################################################################################
-# Alias
-################################################################################
 
-output "aliases" {
-  description = "A map of aliases created and their attributes"
-  value       = aws_kms_alias.this
-}
