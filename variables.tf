@@ -1,109 +1,7 @@
-variable "create_bucket" {
-  description = "Controls if S3 bucket should be created"
+variable "create" {
+  description = "Determines whether resources will be created (affects all resources)"
   type        = bool
   default     = true
-}
-
-variable "attach_elb_log_delivery_policy" {
-  description = "Controls if S3 bucket should have ELB log delivery policy attached"
-  type        = bool
-  default     = false
-}
-
-variable "attach_lb_log_delivery_policy" {
-  description = "Controls if S3 bucket should have ALB/NLB log delivery policy attached"
-  type        = bool
-  default     = false
-}
-
-variable "attach_access_log_delivery_policy" {
-  description = "Controls if S3 bucket should have S3 access log delivery policy attached"
-  type        = bool
-  default     = false
-}
-
-variable "attach_deny_insecure_transport_policy" {
-  description = "Controls if S3 bucket should have deny non-SSL transport policy attached"
-  type        = bool
-  default     = false
-}
-
-variable "attach_require_latest_tls_policy" {
-  description = "Controls if S3 bucket should require the latest version of TLS"
-  type        = bool
-  default     = false
-}
-
-variable "attach_policy" {
-  description = "Controls if S3 bucket should have bucket policy attached (set to `true` to use value of `policy` as bucket policy)"
-  type        = bool
-  default     = false
-}
-
-variable "attach_public_policy" {
-  description = "Controls if a user defined public bucket policy will be attached (set to `false` to allow upstream to apply defaults to the bucket)"
-  type        = bool
-  default     = true
-}
-
-variable "attach_inventory_destination_policy" {
-  description = "Controls if S3 bucket should have bucket inventory destination policy attached."
-  type        = bool
-  default     = false
-}
-
-variable "attach_analytics_destination_policy" {
-  description = "Controls if S3 bucket should have bucket analytics destination policy attached."
-  type        = bool
-  default     = false
-}
-
-variable "attach_deny_incorrect_encryption_headers" {
-  description = "Controls if S3 bucket should deny incorrect encryption headers policy attached."
-  type        = bool
-  default     = false
-}
-
-variable "attach_deny_incorrect_kms_key_sse" {
-  description = "Controls if S3 bucket policy should deny usage of incorrect KMS key SSE."
-  type        = bool
-  default     = false
-}
-
-variable "allowed_kms_key_arn" {
-  description = "The ARN of KMS key which should be allowed in PutObject"
-  type        = string
-  default     = null
-}
-
-variable "attach_deny_unencrypted_object_uploads" {
-  description = "Controls if S3 bucket should deny unencrypted object uploads policy attached."
-  type        = bool
-  default     = false
-}
-
-variable "bucket" {
-  description = "(Optional, Forces new resource) The name of the bucket. If omitted, Terraform will assign a random, unique name."
-  type        = string
-  default     = null
-}
-
-variable "bucket_prefix" {
-  description = "(Optional, Forces new resource) Creates a unique bucket name beginning with the specified prefix. Conflicts with bucket."
-  type        = string
-  default     = null
-}
-
-variable "acl" {
-  description = "(Optional) The canned ACL to apply. Conflicts with `grant`"
-  type        = string
-  default     = null
-}
-
-variable "policy" {
-  description = "(Optional) A valid bucket policy JSON document. Note that if the policy document is not specific enough (but still valid), Terraform may view the policy as constantly changing in a terraform plan. In this case, please make sure you use the verbose/specific version of the policy. For more information about building AWS IAM policy documents with Terraform, see the AWS IAM Policy Document Guide."
-  type        = string
-  default     = null
 }
 
 variable "environment" {
@@ -126,200 +24,150 @@ variable "team_name" {
   type = string
 }
 
-variable "force_destroy" {
-  description = "(Optional, Default:false ) A boolean that indicates all objects should be deleted from the bucket so that the bucket can be destroyed without error. These objects are not recoverable."
+################################################################################
+# Secret
+################################################################################
+
+variable "description" {
+  description = "A description of the secret"
+  type        = string
+  default     = null
+}
+
+variable "force_overwrite_replica_secret" {
+  description = "Accepts boolean value to specify whether to overwrite a secret with the same name in the destination Region"
+  type        = bool
+  default     = null
+}
+
+variable "kms_key_id" {
+  description = "ARN or Id of the AWS KMS key to be used to encrypt the secret values in the versions stored in this secret. If you need to reference a CMK in a different account, you can use only the key ARN. If you don't specify this value, then Secrets Manager defaults to using the AWS account's default KMS key (the one named `aws/secretsmanager`"
+  type        = string
+  default     = null
+}
+
+variable "name" {
+  description = "Friendly name of the new secret. The secret name can consist of uppercase letters, lowercase letters, digits, and any of the following characters: `/_+=.@-`"
+  type        = string
+  default     = null
+}
+
+variable "name_prefix" {
+  description = "Creates a unique name beginning with the specified prefix"
+  type        = string
+  default     = null
+}
+
+variable "recovery_window_in_days" {
+  description = "Number of days that AWS Secrets Manager waits before it can delete the secret. This value can be `0` to force deletion without recovery or range from `7` to `30` days. The default value is `30`"
+  type        = number
+  default     = null
+}
+
+variable "replica" {
+  description = "Configuration block to support secret replication"
+  type        = map(any)
+  default     = {}
+}
+
+################################################################################
+# Policy
+################################################################################
+
+variable "create_policy" {
+  description = "Determines whether a policy will be created"
   type        = bool
   default     = false
 }
 
-variable "acceleration_status" {
-  description = "(Optional) Sets the accelerate configuration of an existing bucket. Can be Enabled or Suspended."
-  type        = string
-  default     = null
-}
-
-variable "request_payer" {
-  description = "(Optional) Specifies who should bear the cost of Amazon S3 data transfer. Can be either BucketOwner or Requester. By default, the owner of the S3 bucket would incur the costs of any data transfer. See Requester Pays Buckets developer guide for more information."
-  type        = string
-  default     = null
-}
-
-variable "website" {
-  description = "Map containing static web-site hosting or redirect configuration."
-  type        = any # map(string)
-  default     = {}
-}
-
-variable "cors_rule" {
-  description = "List of maps containing rules for Cross-Origin Resource Sharing."
-  type        = any
-  default     = []
-}
-
-variable "versioning" {
-  description = "Map containing versioning configuration."
-  type        = map(string)
-  default     = {}
-}
-
-variable "logging" {
-  description = "Map containing access bucket logging configuration."
-  type        = map(string)
-  default     = {}
-}
-
-variable "access_log_delivery_policy_source_buckets" {
-  description = "(Optional) List of S3 bucket ARNs wich should be allowed to deliver access logs to this bucket."
+variable "source_policy_documents" {
+  description = "List of IAM policy documents that are merged together into the exported document. Statements must have unique `sid`s"
   type        = list(string)
   default     = []
 }
 
-variable "access_log_delivery_policy_source_accounts" {
-  description = "(Optional) List of AWS Account IDs should be allowed to deliver access logs to this bucket."
+variable "override_policy_documents" {
+  description = "List of IAM policy documents that are merged together into the exported document. In merging, statements with non-blank `sid`s will override statements with the same `sid`"
   type        = list(string)
   default     = []
 }
 
-variable "grant" {
-  description = "An ACL policy grant. Conflicts with `acl`"
-  type        = any
-  default     = []
-}
-
-variable "owner" {
-  description = "Bucket owner's display name and ID. Conflicts with `acl`"
-  type        = map(string)
+variable "policy_statements" {
+  description = "A map of IAM policy [statements](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document#statement) for custom permission usage"
+  type        = map(any)
   default     = {}
-}
-
-variable "expected_bucket_owner" {
-  description = "The account ID of the expected bucket owner"
-  type        = string
-  default     = null
-}
-
-variable "lifecycle_rule" {
-  description = "List of maps containing configuration of object lifecycle management."
-  type        = any
-  default     = []
-}
-
-variable "replication_configuration" {
-  description = "Map containing cross-region replication configuration."
-  type        = any
-  default     = {}
-}
-
-variable "server_side_encryption_configuration" {
-  description = "Map containing server-side encryption configuration."
-  type        = any
-  default     = {}
-}
-
-variable "intelligent_tiering" {
-  description = "Map containing intelligent tiering configuration."
-  type        = any
-  default     = {}
-}
-
-variable "object_lock_configuration" {
-  description = "Map containing S3 object locking configuration."
-  type        = any
-  default     = {}
-}
-
-variable "metric_configuration" {
-  description = "Map containing bucket metric configuration."
-  type        = any
-  default     = []
-}
-
-variable "inventory_configuration" {
-  description = "Map containing S3 inventory configuration."
-  type        = any
-  default     = {}
-}
-
-variable "inventory_source_account_id" {
-  description = "The inventory source account id."
-  type        = string
-  default     = null
-}
-
-variable "inventory_source_bucket_arn" {
-  description = "The inventory source bucket ARN."
-  type        = string
-  default     = null
-}
-
-variable "inventory_self_source_destination" {
-  description = "Whether or not the inventory source bucket is also the destination bucket."
-  type        = bool
-  default     = false
-}
-
-variable "analytics_configuration" {
-  description = "Map containing bucket analytics configuration."
-  type        = any
-  default     = {}
-}
-
-variable "analytics_source_account_id" {
-  description = "The analytics source account id."
-  type        = string
-  default     = null
-}
-
-variable "analytics_source_bucket_arn" {
-  description = "The analytics source bucket ARN."
-  type        = string
-  default     = null
-}
-
-variable "analytics_self_source_destination" {
-  description = "Whether or not the analytics source bucket is also the destination bucket."
-  type        = bool
-  default     = false
-}
-
-variable "object_lock_enabled" {
-  description = "Whether S3 bucket should have an Object Lock configuration enabled."
-  type        = bool
-  default     = false
-}
-
-variable "block_public_acls" {
-  description = "Whether Amazon S3 should block public ACLs for this bucket."
-  type        = bool
-  default     = true
 }
 
 variable "block_public_policy" {
-  description = "Whether Amazon S3 should block public bucket policies for this bucket."
+  description = "Makes an optional API call to Zelkova to validate the Resource Policy to prevent broad access to your secret"
+  type        = bool
+  default     = null
+}
+
+################################################################################
+# Version
+################################################################################
+
+variable "ignore_secret_changes" {
+  description = "Determines whether or not Terraform will ignore changes made externally to `secret_string` or `secret_binary`. Changing this value after creation is a destructive operation"
   type        = bool
   default     = true
 }
 
-variable "ignore_public_acls" {
-  description = "Whether Amazon S3 should ignore public ACLs for this bucket."
-  type        = bool
-  default     = true
+variable "secret_string" {
+  description = "Specifies text data that you want to encrypt and store in this version of the secret. This is required if `secret_binary` is not set"
+  type        = string
+  default     = null
 }
 
-variable "restrict_public_buckets" {
-  description = "Whether Amazon S3 should restrict public bucket policies for this bucket."
-  type        = bool
-  default     = true
+variable "secret_binary" {
+  description = "Specifies binary data that you want to encrypt and store in this version of the secret. This is required if `secret_string` is not set. Needs to be encoded to base64"
+  type        = string
+  default     = null
 }
 
-variable "control_object_ownership" {
-  description = "Whether to manage S3 Bucket Ownership Controls on this bucket."
+variable "version_stages" {
+  description = "Specifies a list of staging labels that are attached to this version of the secret. A staging label must be unique to a single version of the secret"
+  type        = list(string)
+  default     = null
+}
+
+variable "create_random_password" {
+  description = "Determines whether a random password will be generated"
   type        = bool
   default     = false
 }
 
-variable "object_ownership" {
-  description = "Object ownership. Valid values: BucketOwnerEnforced, BucketOwnerPreferred or ObjectWriter. 'BucketOwnerEnforced': ACLs are disabled, and the bucket owner automatically owns and has full control over every object in the bucket. 'BucketOwnerPreferred': Objects uploaded to the bucket change ownership to the bucket owner if the objects are uploaded with the bucket-owner-full-control canned ACL. 'ObjectWriter': The uploading account will own the object if the object is uploaded with the bucket-owner-full-control canned ACL."
+variable "random_password_length" {
+  description = "The length of the generated random password"
+  type        = number
+  default     = 32
+}
+
+variable "random_password_override_special" {
+  description = "Supply your own list of special characters to use for string generation. This overrides the default character list in the special argument"
   type        = string
-  default     = "BucketOwnerEnforced"
+  default     = "!@#$%&*()-_=+[]{}<>:?"
+}
+
+################################################################################
+# Rotation
+################################################################################
+
+variable "enable_rotation" {
+  description = "Determines whether secret rotation is enabled"
+  type        = bool
+  default     = false
+}
+
+variable "rotation_lambda_arn" {
+  description = "Specifies the ARN of the Lambda function that can rotate the secret"
+  type        = string
+  default     = ""
+}
+
+variable "rotation_rules" {
+  description = "A structure that defines the rotation configuration for this secret"
+  type        = map(any)
+  default     = {}
 }
