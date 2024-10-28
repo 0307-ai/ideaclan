@@ -1,25 +1,167 @@
-variable "create_lb" {
-  description = "Controls if the Load Balancer should be created"
+################################################################################
+# Repository
+################################################################################
+
+variable "create_repository" {
+  description = "Determines whether a repository will be created"
   type        = bool
   default     = true
 }
 
-variable "lb_name" {
-  description = "The resource name and Name tag of the load balancer."
+variable "repository_name" {
+  description = "The name of the repository"
+  type        = string
+  default     = ""
+}
+
+variable "repository_image_tag_mutability" {
+  description = "The tag mutability setting for the repository. Must be one of: `MUTABLE` or `IMMUTABLE`. Defaults to `IMMUTABLE`"
+  type        = string
+  default     = "IMMUTABLE"
+}
+
+variable "repository_encryption_type" {
+  description = "The encryption type for the repository. Must be one of: `KMS` or `AES256`. Defaults to `AES256`"
   type        = string
   default     = null
 }
 
-variable "name_prefix" {
-  description = "The resource name prefix and Name tag of the load balancer. Cannot be longer than 6 characters"
+variable "repository_kms_key" {
+  description = "The ARN of the KMS key to use when encryption_type is `KMS`. If not specified, uses the default AWS managed key for ECR"
   type        = string
   default     = null
 }
 
-variable "load_balancer_type" {
-  description = "The type of load balancer to create. Possible values are application or network."
+variable "repository_image_scan_on_push" {
+  description = "Indicates whether images are scanned after being pushed to the repository (`true`) or not scanned (`false`)"
+  type        = bool
+  default     = true
+}
+
+variable "repository_policy" {
+  description = "The JSON policy to apply to the repository. If not specified, uses the default policy"
   type        = string
-  default     = "application"
+  default     = null
+}
+
+variable "repository_force_delete" {
+  description = "If `true`, will delete the repository even if it contains images. Defaults to `false`"
+  type        = bool
+  default     = null
+}
+
+################################################################################
+# Repository Policy
+################################################################################
+
+variable "attach_repository_policy" {
+  description = "Determines whether a repository policy will be attached to the repository"
+  type        = bool
+  default     = true
+}
+
+variable "create_repository_policy" {
+  description = "Determines whether a repository policy will be created"
+  type        = bool
+  default     = true
+}
+
+variable "repository_read_access_arns" {
+  description = "The ARNs of the IAM users/roles that have read access to the repository"
+  type        = list(string)
+  default     = []
+}
+
+variable "repository_lambda_read_access_arns" {
+  description = "The ARNs of the Lambda service roles that have read access to the repository"
+  type        = list(string)
+  default     = []
+}
+
+variable "repository_read_write_access_arns" {
+  description = "The ARNs of the IAM users/roles that have read/write access to the repository"
+  type        = list(string)
+  default     = []
+}
+
+################################################################################
+# Lifecycle Policy
+################################################################################
+
+variable "create_lifecycle_policy" {
+  description = "Determines whether a lifecycle policy will be created"
+  type        = bool
+  default     = false
+}
+
+variable "repository_lifecycle_policy" {
+  description = "The policy document. This is a JSON formatted string. See more details about [Policy Parameters](http://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html#lifecycle_policy_parameters) in the official AWS docs"
+  type        = string
+  default     = ""
+}
+
+################################################################################
+# Registry Policy
+################################################################################
+
+variable "create_registry_policy" {
+  description = "Determines whether a registry policy will be created"
+  type        = bool
+  default     = false
+}
+
+variable "registry_policy" {
+  description = "The policy document. This is a JSON formatted string"
+  type        = string
+  default     = null
+}
+
+################################################################################
+# Registry Pull Through Cache Rule
+################################################################################
+
+variable "registry_pull_through_cache_rules" {
+  description = "List of pull through cache rules to create"
+  type        = map(map(string))
+  default     = {}
+}
+
+################################################################################
+# Registry Scanning Configuration
+################################################################################
+
+variable "manage_registry_scanning_configuration" {
+  description = "Determines whether the registry scanning configuration will be managed"
+  type        = bool
+  default     = false
+}
+
+variable "registry_scan_type" {
+  description = "the scanning type to set for the registry. Can be either `ENHANCED` or `BASIC`"
+  type        = string
+  default     = "ENHANCED"
+}
+
+variable "registry_scan_rules" {
+  description = "One or multiple blocks specifying scanning rules to determine which repository filters are used and at what frequency scanning will occur"
+  type        = any
+  default     = []
+}
+
+################################################################################
+# Registry Replication Configuration
+################################################################################
+
+variable "create_registry_replication_configuration" {
+  description = "Determines whether a registry replication configuration will be created"
+  type        = bool
+  default     = false
+}
+
+variable "registry_replication_rules" {
+  description = "The replication rules for a replication configuration. A maximum of 10 are allowed"
+  type        = any
+  default     = []
 }
 
 variable "environment" {
@@ -30,243 +172,17 @@ variable "environment" {
 variable "service_name" {
   description = "name of the service to add in tags"
   type = string
+  default = null
 }
 
 variable "launched_by" {
   description = "name of the user who is launching the cluster for adding in tags"
   type = string
+  default = null
 }
 
 variable "team_name" {
   description = "name of the team to add in tags"
   type = string
-}
-
-variable "internal" {
-  description = "Boolean determining if the load balancer is internal or externally facing."
-  type        = bool
-  default     = true
-}
-
-variable "security_groups" {
-  description = "The security groups to attach to the load balancer. e.g. [\"sg-edcd9784\",\"sg-edcd9785\"]"
-  type        = list(string)
-  default     = []
-}
-
-variable "subnets" {
-  description = "A list of subnets to associate with the load balancer. e.g. ['subnet-1a2b3c4d','subnet-1a2b3c4e','subnet-1a2b3c4f']"
-  type        = list(string)
-  default     = null
-}
-
-variable "idle_timeout" {
-  description = "The time in seconds that the connection is allowed to be idle."
-  type        = number
-  default     = 60
-}
-
-variable "enable_cross_zone_load_balancing" {
-  description = "Indicates whether cross zone load balancing should be enabled in application load balancers."
-  type        = bool
-  default     = false
-}
-
-variable "enable_deletion_protection" {
-  description = "If true, deletion of the load balancer will be disabled via the AWS API. This will prevent Terraform from deleting the load balancer. Defaults to false."
-  type        = bool
-  default     = false
-}
-
-variable "enable_http2" {
-  description = "Indicates whether HTTP/2 is enabled in application load balancers."
-  type        = bool
-  default     = true
-}
-
-variable "enable_tls_version_and_cipher_suite_headers" {
-  description = "Indicates whether the two headers (x-amzn-tls-version and x-amzn-tls-cipher-suite), which contain information about the negotiated TLS version and cipher suite, are added to the client request before sending it to the target."
-  type        = bool
-  default     = false
-}
-
-variable "enable_xff_client_port" {
-  description = "Indicates whether the X-Forwarded-For header should preserve the source port that the client used to connect to the load balancer in application load balancers."
-  type        = bool
-  default     = true
-}
-
-variable "ip_address_type" {
-  description = "The type of IP addresses used by the subnets for your load balancer. The possible values are ipv4 and dualstack."
-  type        = string
-  default     = "ipv4"
-}
-
-variable "drop_invalid_header_fields" {
-  description = "Indicates whether invalid header fields are dropped in application load balancers. Defaults to false."
-  type        = bool
-  default     = false
-}
-
-variable "preserve_host_header" {
-  description = "Indicates whether Host header should be preserve and forward to targets without any change. Defaults to false."
-  type        = bool
-  default     = false
-}
-
-variable "enable_waf_fail_open" {
-  description = "Indicates whether to route requests to targets if lb fails to forward the request to AWS WAF"
-  type        = bool
-  default     = false
-}
-
-variable "desync_mitigation_mode" {
-  description = "Determines how the load balancer handles requests that might pose a security risk to an application due to HTTP desync."
-  type        = string
-  default     = "defensive"
-}
-
-variable "xff_header_processing_mode" {
-  description = "Determines how the load balancer modifies the X-Forwarded-For header in the HTTP request before sending the request to the target."
-  type        = string
-  default     = "append"
-}
-
-## example access logs (bucket is required others are optional)
-# {
-#   "enabled" = true or false
-#   "bucket" = ""
-#   "prefix" = ""
-# }
-
-variable "access_logs" {
-  description = "Map containing access logging configuration for load balancer."
-  type        = map(string)
-  default     = {}
-}
-
-## example subnet mapping (subnet_id is required others are optional)
-# {
-#   "subnet_id" = true or false
-#   "allocation_id" = ""
-#   "private_ipv4_address" = ""
-#   "ipv6_address = ""
-# }
-
-variable "subnet_mapping" {
-  description = "A list of subnet mapping blocks describing subnets to attach to network load balancer"
-  type        = list(map(string))
-  default     = []
-}
-
-variable "load_balancer_create_timeout" {
-  description = "Timeout value when creating the ALB."
-  type        = string
-  default     = "10m"
-}
-
-variable "load_balancer_delete_timeout" {
-  description = "Timeout value when deleting the ALB."
-  type        = string
-  default     = "10m"
-}
-
-variable "load_balancer_update_timeout" {
-  description = "Timeout value when updating the ALB."
-  type        = string
-  default     = "10m"
-}
-
-variable "vpc_id" {
-  description = "VPC id where the load balancer and other resources will be deployed."
-  type        = string
-  default     = null
-}
-
-variable "target_groups" {
-  description = "A list of maps containing key/value pairs that define the target groups to be created. Order of these maps is important and the index of these are to be referenced in listener definitions. Required key/values: name, backend_protocol, backend_port"
-  type        = any
-  default     = []
-}
-
-variable "listener_ssl_policy_default" {
-  description = "The security policy if using HTTPS externally on the load balancer. [See](https://docs.aws.amazon.com/elasticloadbalancing/latest/classic/elb-security-policy-table.html)."
-  type        = string
-  default     = "ELBSecurityPolicy-2016-08"
-}
-
-variable "https_listeners" {
-  description = "A list of maps describing the HTTPS listeners for this ALB. Required key/values: port, certificate_arn. Optional key/values: ssl_policy (defaults to ELBSecurityPolicy-2016-08), target_group_index (defaults to https_listeners[count.index])"
-  type        = any
-  default     = []
-}
-
-variable "http_tcp_listeners" {
-  description = "A list of maps describing the HTTP listeners or TCP ports for this ALB. Required key/values: port, protocol. Optional key/values: target_group_index (defaults to http_tcp_listeners[count.index])"
-  type        = any
-  default     = []
-}
-
-variable "https_listener_rules" {
-  description = "A list of maps describing the Listener Rules for this ALB. Required key/values: actions, conditions. Optional key/values: priority, https_listener_index (default to https_listeners[count.index])"
-  type        = any
-  default     = []
-}
-
-variable "http_tcp_listener_rules" {
-  description = "A list of maps describing the Listener Rules for this ALB. Required key/values: actions, conditions. Optional key/values: priority, http_tcp_listener_index (default to http_tcp_listeners[count.index])"
-  type        = any
-  default     = []
-}
-
-variable "extra_ssl_certs" {
-  description = "A list of maps describing any extra SSL certificates to apply to the HTTPS listeners. Required key/values: certificate_arn, https_listener_index (the index of the listener within https_listeners which the cert applies toward)."
-  type        = list(map(string))
-  default     = []
-}
-
-variable "web_acl_arn" {
-  description = "WAF ARN to associate this LB with."
-  type        = string
-  default     = null
-}
-
-################################################################################
-# Security Group
-################################################################################
-
-variable "create_security_group" {
-  description = "Determines if a security group is created"
-  type        = bool
-  default     = false
-}
-
-variable "security_group_name" {
-  description = "Name to use on security group created"
-  type        = string
-  default     = null
-}
-
-variable "security_group_use_name_prefix" {
-  description = "Determines whether the security group name (`security_group_name`) is used as a prefix"
-  type        = bool
-  default     = true
-}
-
-variable "security_group_description" {
-  description = "Description of the security group created"
-  type        = string
-  default     = null
-}
-
-variable "security_group_rules" {
-  description = "Security group rules to add to the security group created"
-  type        = any
-  default     = {}
-}
-
-variable "web_acl_arn" {
-  description = "WAF ARN to associate this LB with."
-  type        = string
-  default     = null
+  default = null
 }
