@@ -1,10 +1,12 @@
-data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 locals {
   account_id          = data.aws_caller_identity.current.account_id
   partition           = data.aws_partition.current.partition
-  role_sts_externalid = flatten([var.role_sts_externalid])
+  dns_suffix          = data.aws_partition.current.dns_suffix
+  region              = data.aws_region.current.name
   tags = {
     service_name = var.service_name
     team_name    = var.team_name
@@ -13,7 +15,7 @@ locals {
   }
 }
 
-data "aws_iam_policy_document" "assume_role" {
+data "aws_iam_policy_document" "this" {
   count = var.create_role ? 1 : 0
 
   dynamic "statement" {
@@ -39,58 +41,49 @@ data "aws_iam_policy_document" "assume_role" {
   }
 
   statement {
-    effect  = "Allow"
-    actions = compact(distinct(concat(["sts:AssumeRole"], var.trusted_role_actions)))
+      effect  = "Allow"
+      actions = ["sts:AssumeRoleWithWebIdentity"]
 
-    principals {
-      type        = "AWS"
-      identifiers = var.trusted_role_arns
-    }
-
-    principals {
-      type        = "Service"
-      identifiers = var.trusted_role_services
-    }
-
-    dynamic "condition" {
-      for_each = length(local.role_sts_externalid) != 0 ? [true] : []
-      content {
-        test     = "StringEquals"
-        variable = "sts:ExternalId"
-        values   = local.role_sts_externalid
+      principals {
+        type        = "Federated"
+        identifiers = ["arn:aws:iam::${local.account_id}:oidc-provider/oidc.eks.${local.region}.amazonaws.com/id/${var.oidc_id}"]
       }
-    }
 
-    dynamic "condition" {
-      for_each = var.role_requires_session_name ? [1] : []
-      content {
-        test     = "StringEquals"
-        variable = "sts:RoleSessionName"
-        values   = var.role_session_name
+      condition {
+        test     = var.assume_role_condition_test
+        variable = "oidc.eks.${local.region}.amazonaws.com/id/${var.oidc_id}:sub"
+        values   = ["system:serviceaccount:${var.service_account_namespace}:${var.service_account_name}"]
       }
-    }
+
+      # https://aws.amazon.com/premiumsupport/knowledge-center/eks-troubleshoot-oidc-and-irsa/?nc1=h_ls
+      condition {
+        test     = var.assume_role_condition_test
+        variable = "oidc.eks.${local.region}.amazonaws.com/id/${var.oidc_id}:aud"
+        values   = ["sts.amazonaws.com"]
+      }
   }
 }
 
 resource "aws_iam_role" "this" {
   count = var.create_role ? 1 : 0
 
-  name                 = var.role_name
-  path                 = var.role_path
-  max_session_duration = var.max_session_duration
-  description          = var.role_description
+  name        = var.role_name
+  path        = var.role_path
+  description = var.role_description
 
-  force_detach_policies = var.force_detach_policies
+  assume_role_policy    = data.aws_iam_policy_document.this[0].json
+  max_session_duration  = var.max_session_duration
   permissions_boundary  = var.role_permissions_boundary_arn
-
-  assume_role_policy = coalesce(
-    var.custom_role_trust_policy,
-    try(
-      data.aws_iam_policy_document.assume_role[0].json
-    )
-  )
+  force_detach_policies = var.force_detach_policies
 
   tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "this" {
+  count = length(var.role_policy_arns)
+
+  role       = aws_iam_role.this[0].name
+  policy_arn = element(var.role_policy_arns, count.index)
 }
 
 resource "aws_iam_role_policy_attachment" "custom" {
@@ -98,20 +91,4 @@ resource "aws_iam_role_policy_attachment" "custom" {
 
   role       = aws_iam_role.this[0].name
   policy_arn = aws_iam_policy.policy[0].arn
-}
-
-resource "aws_iam_role_policy_attachment" "this" {
-  count = var.create_role ? length(var.custom_role_policy_arns) : 0
-
-  role       = aws_iam_role.this[0].name
-  policy_arn = element(var.custom_role_policy_arns, count.index)
-}
-
-resource "aws_iam_instance_profile" "this" {
-  count = var.create_role && var.create_instance_profile ? 1 : 0
-  name  = var.role_name
-  path  = var.role_path
-  role  = aws_iam_role.this[0].name
-
-  tags = local.tags
 }
