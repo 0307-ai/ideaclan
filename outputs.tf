@@ -1,26 +1,20 @@
-output "eks_cluster_name" {
-  description = "name of the created EKS cluster"
-  value       = module.eks.cluster_name
+output "cluster_endpoint" {
+  value = data.aws_eks_cluster.cluster.endpoint
 }
-
-output "eks_cluster_endpoint" {
-  description = "The endpoint of the created EKS Cluster"
-  value       = module.eks.cluster_endpoint
+ 
+output "cluster_ca_certificate" {
+  value = data.aws_eks_cluster.cluster.certificate_authority.0.data
 }
-
-output "eks_oidc_id" {
-  description = "oidc provider id"
-  value       = regex("oidc\\.eks\\..*\\/id/(.*)", module.eks.oidc_provider_arn)[0]
+ 
+output "cluster_name" {
+  value = data.aws_eks_cluster.cluster.name
 }
-
-output "oidc_provider_arn" {
-  description = "oidc provider arn"
-  value       = module.eks.oidc_provider_arn
+ 
+output "cluster_version" {
+  value = data.aws_eks_cluster.cluster.version
 }
-
-# output "eks_cluster_certificate_authority_data"{
-#   description = "certificate_authority_data"
-#   value = module.eks.cluster_certificate_authority_data
+ 
+# output "cluster_token" {
+#   value = data.aws_eks_cluster_auth.cluster.token
+#   sensitive = true
 # }
-
-# output "eks_cluster_certificate_authority_data" { value = module.eks.certificate_authority.data }

@@ -1,0 +1,17 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: karpenter
+  namespace: argocd
+spec:
+  source:
+    repoURL: "https://github.com/<repo-name>/argocd-manifests.git"
+    targetRevision: HEAD
+    path: "argo-addon-apps"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace:
+  project: addon-apps
+  syncPolicy:
+    automated:
+      selfHeal: true
