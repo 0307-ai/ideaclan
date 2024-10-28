@@ -1,16 +1,27 @@
-# output "load_balancer_dns_name" {
-#   description = "LoadBalancer dns name"
-#   value = module.alb.load_balancer_dns_name
-# }
+################################################################################
+# Key
+################################################################################
 
-output "auto_scaling_group_name" {
-  description = "Auto scaling group name"
-  value = aws_autoscaling_group.jenkins_master_asg.name
+output "key_arn" {
+  description = "The Amazon Resource Name (ARN) of the key"
+  value       = try(aws_kms_key.this[0].arn, aws_kms_replica_key.this[0].arn,  null)
 }
 
-output "launch_template_id" {
-  description = " launch template id"
-  value = aws_launch_template.application_lt.id
+output "key_id" {
+  description = "The globally unique identifier for the key"
+  value       = try(aws_kms_key.this[0].key_id, aws_kms_replica_key.this[0].key_id, null)
 }
 
+output "key_policy" {
+  description = "The IAM resource policy set on the key"
+  value       = try(aws_kms_key.this[0].policy, aws_kms_replica_key.this[0].policy, null)
+}
 
+################################################################################
+# Alias
+################################################################################
+
+output "aliases" {
+  description = "A map of aliases created and their attributes"
+  value       = aws_kms_alias.this
+}
