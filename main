@@ -1,1 +1,7 @@
-0000000000000000000000000000000000000000 185c1f576fdd359d61befaead4721e1ac84db556 devops <devops@lookfinity.com> 1726120678 +0530	clone: from bitbucket.org:lookfinitydev/ideaclan-infra-modules.git
+terraform {
+  # backend "s3" {
+  #   bucket         = "ideaclan-terraform-state-shared"
+  #   key            = "jenkins/terraform.tfstate"
+  #   region         = "us-east-1"
+  # }
+}
